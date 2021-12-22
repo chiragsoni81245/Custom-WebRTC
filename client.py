@@ -21,9 +21,6 @@ class Client:
 	def stun_request(self, host="3.132.150.53", port=3478):
 		print("Connecting to STUN Server...")
 		
-		# Bind Socket
-		self.bind()
-
 		print("STUN Request to {}:{}".format(host, port))
 		# Sending Request to STUN Server
 		request = "whoami\0"
