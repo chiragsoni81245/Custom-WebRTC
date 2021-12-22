@@ -1,5 +1,5 @@
 from socket import *
-import os
+import os, sys
 from threading import Thread
 import re
 from concurrent.futures import ThreadPoolExecutor
@@ -67,21 +67,21 @@ class Client:
 				temp, address = self.socket_obj.recvfrom(1)
 				if address!=(host,port):
 					print("Unknown Client {}:{} tries to Connect".format(address[0], address[1]))
-					temp, address = self.socket_obj.recvfrom(1)
 					continue
 				if len(data.decode('utf-8'))>2:
 					error_msg = "Message length exeded!"
 					print(error_msg)
 					break
-				data += temp
-				temp, address = self.socket_obj.recvfrom(1)
 				if temp==b"\x00":
 					break
+				data += temp
+				
 			
 			peer_response = data.decode('utf-8')
 			if error_msg or peer_response!="Yo":
 				raise ValueError('Wrong Response of peer request from {}:{}'.format(host, port))
 			
+			print("Connected!")
 			self._conn_handler_thread_pool.submit(self.receiver)
 			self._conn_handler_thread_pool.submit(self.message_printer)
 			self.message_sender((host, port))
@@ -95,6 +95,26 @@ class Client:
 		for i in response_for_peer:
 			self.socket_obj.sendto(i.encode('utf-8'), (host,port))
 
+		print("Waiting for Peer to response...")
+		data, error_msg = b'', False
+		while True:
+			temp, address = self.socket_obj.recvfrom(1)
+			if address!=(host,port):
+				print("Unknown Client {}:{} tries to Connect".format(address[0], address[1]))
+				continue
+			if len(data.decode('utf-8'))>4:
+				error_msg = "Message length exeded!"
+				print(error_msg)
+				break
+			if temp==b"\x00":
+				break
+			data += temp
+			
+		peer_response = data.decode('utf-8')
+		if error_msg or peer_response!="Hey!":
+			raise ValueError('Wrong Response of peer request from {}:{}'.format(host, port))
+
+		print("Connected!")
 		self._conn_handler_thread_pool.submit(self.receiver)
 		self._conn_handler_thread_pool.submit(self.message_printer)
 		self.message_sender((host, port))
@@ -117,7 +137,7 @@ class Client:
 			has_to_be_deleted_keys = []
 			for address in keys:
 				if self.received_data[address][1]:
-					print("Message[{}:{}]<--{}".format(address[0], address[1], self.received_data[address][0]))
+					print("\nMessage[{}:{}]<-- {}".format(address[0], address[1], self.received_data[address][0].decode('utf-8')))
 					has_to_be_deleted_keys.append(address)
 
 			for key in has_to_be_deleted_keys:
@@ -133,3 +153,9 @@ class Client:
 			msg+="\0"
 			for i in msg:
 				self.socket_obj.sendto(i.encode('utf-8'), address)
+
+
+if __name__=="__main__":
+	c1 = Client('0.0.0.0', int(sys.argv[1]))
+	c1.bind()
+	print(c1.stun_request())
