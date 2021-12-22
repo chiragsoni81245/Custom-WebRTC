@@ -18,7 +18,7 @@ class Client:
 	def stun_request(self, host="3.132.150.53", port=3478):
 		print("Connecting to STUN Server...")
 		# Create Socket
-		self.socket_obj = socket(family=AF_INET, type=SOCK_STREAM)
+		self.socket_obj = socket(family=AF_INET, type=SOCK_DGRAM)
 		self.socket_obj.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 		# Bind Socket
 		self.socket_obj.bind(( self.host, self.port ))
@@ -51,7 +51,7 @@ class Client:
 			This function is to bind port with our socket and then
 			start listening on that port
 		'''
-		self.socket_obj = socket(family=AF_INET, type=SOCK_STREAM)
+		self.socket_obj = socket(family=AF_INET, type=SOCK_DGRAM)
 		self.socket_obj.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 		try:
 			print("Binding to port {} ...".format(self.port))

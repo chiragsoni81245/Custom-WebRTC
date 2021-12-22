@@ -12,7 +12,7 @@ def clear_screen():
 class Client:
 
 	def __init__(self):
-		self.soc = socket(family=AF_INET, type=SOCK_STREAM)
+		self.soc = socket(family=AF_INET, type=SOCK_DGRAM)
 		self.soc.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
 	def connect(self, host, port):
