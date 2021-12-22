@@ -3,40 +3,41 @@ import os
 from threading import Thread
 import re
 from concurrent.futures import ThreadPoolExecutor
-
+from time import sleep
 
 class Client:
 
 	def __init__(self, host, port):
 		self.host = host
 		self.port = port
-		self._conn_handler_thread_pool = ThreadPoolExecutor(10)
-		self._receiver_thread_pool = ThreadPoolExecutor(10)
-		self.connections = []
-		self.receivers = {}
-
-	def stun_request(self, host="3.132.150.53", port=3478):
-		print("Connecting to STUN Server...")
 		# Create Socket
 		self.socket_obj = socket(family=AF_INET, type=SOCK_DGRAM)
 		self.socket_obj.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+		self._conn_handler_thread_pool = ThreadPoolExecutor(10)
+		self._receiver_thread_pool = ThreadPoolExecutor(10)
+		self.connections = []
+		self.received_data = {}
+
+	def stun_request(self, host="3.132.150.53", port=3478):
+		print("Connecting to STUN Server...")
+		
 		# Bind Socket
-		self.socket_obj.bind(( self.host, self.port ))
-		# Connect Socket
-		self.socket_obj.connect((host, port))
+		self.bind()
 
 		print("STUN Request to {}:{}".format(host, port))
+		# Sending Request to STUN Server
+		request = "whoami\0"
+		for i in request:
+			self.socket_obj.sendto(i.encode('utf-8'), (host, port))
+		print("Listning for STUN server response...")
 		data = b''
 		temp = self.socket_obj.recv(1)
-		while temp:
-			if temp==b"\x00":
-				break
+		while temp!=b"\x00":
 			data += temp
 			temp = self.socket_obj.recv(1)
 
 		data = str(data, 'utf-8')
-		self.socket_obj.close()
-		self.socket_obj = None
+
 		if re.fullmatch("^(?:\d{1,3}\.){3}\d{1,3}:\d+$", data):
 			temp_data = data.strip().split(":")
 			self.public_ip, self.public_port = temp_data[0], int(temp_data[1])
@@ -48,66 +49,90 @@ class Client:
 
 	def bind(self):
 		'''
-			This function is to bind port with our socket and then
-			start listening on that port
+			This function is to bind port with our socket
 		'''
-		self.socket_obj = socket(family=AF_INET, type=SOCK_DGRAM)
-		self.socket_obj.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 		try:
 			print("Binding to port {} ...".format(self.port))
 			self.socket_obj.bind(( self.host, self.port ))
-			# One argument is listen function is the no. of unaccepted connection allowed before refusing new connections
-			print("Listening...")
-			self.socket_obj.listen(5)
 		except error as msg:
 			print("Socket Binding error {}".format(str(msg)))
 			print("Retrying...")
 			self.bind()
 
-	def accept_connections(self):
-		'''
-			This function is for Establishing Connections before that socket must be listening
-		'''
+	def request_peer(self, host, port):
 		try:
+			offer_message = "Hey!\0"
+			for i in offer_message:
+				self.socket_obj.sendto(i.encode('utf-8'), (host,port))
+			print("Waiting for Peer to response...")
+			data, error_msg = b'', False
 			while True:
-				conn, address = self.socket_obj.accept()
-				print("Connection has been established! | {}:{}".format(address[0],address[1]))
-
-				thread = self._conn_handler_thread_pool.submit(
-					self.conn_handler, 
-					conn, address
-				)
-				self.connections.append((conn, address, thread))
+				temp, address = self.socket_obj.recvfrom(1)
+				if address!=(host,port):
+					print("Unknown Client {}:{} tries to Connect".format(address[0], address[1]))
+					temp, address = self.socket_obj.recvfrom(1)
+					continue
+				if len(data.decode('utf-8'))>2:
+					error_msg = "Message length exeded!"
+					print(error_msg)
+					break
+				data += temp
+				temp, address = self.socket_obj.recvfrom(1)
+				if temp==b"\x00":
+					break
+			
+			peer_response = data.decode('utf-8')
+			if error_msg or peer_response!="Yo":
+				raise ValueError('Wrong Response of peer request from {}:{}'.format(host, port))
+			
+			self._conn_handler_thread_pool.submit(self.receiver)
+			self._conn_handler_thread_pool.submit(self.message_printer)
+			self.message_sender((host, port))
 
 		except Exception as error:
-			print("Error in accepting connections")
+			print("Error in requesting peer")
 			print(error)
 
+	def response_to_peer(self, host, port):
+		response_for_peer = "Yo\0"
+		for i in response_for_peer:
+			self.socket_obj.sendto(i.encode('utf-8'), (host,port))
 
-	def receiver(self, conn, address):
-		print("Receiver Started for {}".format(address))
-		data = b''
-		temp = conn.recv(1)
-		while temp:
-			if temp==b"\x00":
-				print("\n{} <-- {}".format( str(data, 'utf-8'), address))
-				data = b''
-				temp = conn.recv(1)
-			data += temp
-			temp = conn.recv(1)
+		self._conn_handler_thread_pool.submit(self.receiver)
+		self._conn_handler_thread_pool.submit(self.message_printer)
+		self.message_sender((host, port))
 
-	def conn_handler(self, conn, address):
-		receiver_thread_obj = self._receiver_thread_pool.submit(
-			self.receiver,
-			conn, address
-		)
-		self.receivers[address] = receiver_thread_obj
+	def receiver(self):
+		while True:
+			temp, address = self.socket_obj.recvfrom(1)
+			while temp!=b'\x00':
+				if address in self.received_data:
+					if not self.received_data[address][1]:
+						self.received_data[address][0] += temp
+				else:
+					self.received_data[address] = [temp, False]
+				temp, address = self.socket_obj.recvfrom(1)
+			self.received_data[address][1] = True
 
+	def message_printer(self):
+		while True:
+			keys = self.received_data.keys()
+			has_to_be_deleted_keys = []
+			for address in keys:
+				if self.received_data[address][1]:
+					print("Message[{}:{}]<--{}".format(address[0], address[1], self.received_data[address][0]))
+					has_to_be_deleted_keys.append(address)
+
+			for key in has_to_be_deleted_keys:
+				del self.received_data[key]
+			sleep(0.01)
+
+	def message_sender(self, address):
 		while True:
 			msg = input("Write a MSG to {}:{} - ".format(address[0], address[1]))
 			while msg=="":
 				msg = input("Write a MSG to {}:{} - ".format(address[0], address[1]))
 			
 			msg+="\0"
-			msg = str.encode(msg, 'utf-8')
-			conn.send(msg)
+			for i in msg:
+				self.socket_obj.sendto(i.encode('utf-8'), address)
